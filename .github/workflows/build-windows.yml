@@ -37,6 +37,19 @@ jobs:
           "VITE_SUPABASE_ANON_KEY=$supabaseKey" | Add-Content -Path .env -Encoding utf8
         shell: pwsh
       
+      - name: Verify icons exist
+        run: |
+          cd gestionale-veicoli-app/src-tauri
+          if (Test-Path "icons/icon.ico") {
+            Write-Host "✓ icon.ico found"
+            Get-Item "icons/icon.ico" | Select-Object Name, Length
+          } else {
+            Write-Host "✗ icon.ico NOT found"
+            Get-ChildItem -Recurse icons/ | Select-Object FullName
+            exit 1
+          }
+        shell: pwsh
+      
       - name: Build Tauri app
         run: |
           cd gestionale-veicoli-app
