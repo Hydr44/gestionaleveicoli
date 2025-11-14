@@ -1,0 +1,58 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      
+      - name: Install dependencies
+        run: |
+          cd gestionale-veicoli-app
+          npm install
+      
+      - name: Create .env file
+        run: |
+          cd gestionale-veicoli-app
+          $supabaseUrl = if ("${{ secrets.VITE_SUPABASE_URL }}") { "${{ secrets.VITE_SUPABASE_URL }}" } else { "https://prrymavtfhmdfsglnatj.supabase.co" }
+          $supabaseKey = if ("${{ secrets.VITE_SUPABASE_ANON_KEY }}") { "${{ secrets.VITE_SUPABASE_ANON_KEY }}" } else { "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBycnltYXZ0ZmhtZGZzZ2xuYXRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NDIyMjYsImV4cCI6MjA3ODUxODIyNn0.3yuldIRWCIZMAVWcHkhGmUT0dC5tQJ6UiK7XvkGEdV8" }
+          "VITE_SUPABASE_URL=$supabaseUrl" | Out-File -FilePath .env -Encoding utf8
+          "VITE_SUPABASE_ANON_KEY=$supabaseKey" | Add-Content -Path .env -Encoding utf8
+        shell: pwsh
+      
+      - name: Build Tauri app
+        run: |
+          cd gestionale-veicoli-app
+          npm run tauri:build
+      
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: gestionale-veicoli-app/src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: ignore
+      
+      - name: Upload Windows NSIS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis-installer
+          path: gestionale-veicoli-app/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: ignore
+

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.tauri.app/capability.json",
+  "identifier": "allow-print",
+  "description": "Consente alla finestra principale di invocare window.print().",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:webview:allow-print"
+  ]
+}

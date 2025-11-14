@@ -1,0 +1,1 @@
+{"allow-print":{"identifier":"allow-print","description":"Consente alla finestra principale di invocare window.print().","local":true,"windows":["main"],"permissions":["core:webview:allow-print"]}}
