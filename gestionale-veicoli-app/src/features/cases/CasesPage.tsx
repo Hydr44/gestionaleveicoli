@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CaseForm } from './CaseForm';
 import {
-  acquireCaseLock,
-  checkCaseLock,
   createCaseFromForm,
   deleteCases,
   fetchCases,
-  releaseCaseLock,
   updateCaseFromForm,
+  updateCaseStatus,
 } from './api';
 import type { CaseRecord, ReleasePrintPayload, SeizureCaseFormData } from './types';
 import {
@@ -30,17 +28,178 @@ import {
   type ReportColumn,
 } from './printReportDocument';
 
+const formatDate = (dateStr: string | null | undefined) => {
+  if (!dateStr) return '—';
+  try {
+    const date = new Date(dateStr);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
+  } catch {
+    return dateStr;
+  }
+};
+
 const REPORT_COLUMNS: ReportColumn[] = [
   {
-    key: 'plate',
-    label: 'Targa',
+    key: 'numero_interno_pratica',
+    label: 'Numero interno pratica',
+    accessor: (record) => record.internal_number ?? '—',
+  },
+  {
+    key: 'numero_procedimento',
+    label: 'Numero procedimento',
+    accessor: (record) => record.seizure_case_details?.procedure_number ?? record.case_number ?? '—',
+  },
+  {
+    key: 'chiave_bacheca',
+    label: 'Chiave in bacheca',
+    accessor: (record) => record.board_key ?? '—',
+  },
+  {
+    key: 'data_sequestro',
+    label: 'Data sequestro',
+    accessor: (record) => formatDate(record.seizure_case_details?.seizure_date) ?? '—',
+  },
+  {
+    key: 'organo_accertatore',
+    label: 'Organo accertatore',
+    accessor: (record) => record.seizure_case_details?.enforcement_body ?? '—',
+  },
+  {
+    key: 'generalita_trasgressore',
+    label: 'Generalità trasgressore',
+    accessor: (record) => record.seizure_case_details?.offender_details ?? '—',
+  },
+  {
+    key: 'numero_targa',
+    label: 'Numero targa',
     accessor: (record) =>
       record.vehicles?.plate ?? record.seizure_case_details?.plate_number ?? '—',
   },
   {
-    key: 'case_number',
-    label: 'Numero pratica',
-    accessor: (record) => record.case_number ?? '—',
+    key: 'numero_telaio',
+    label: 'Numero telaio',
+    accessor: (record) => record.seizure_case_details?.vin_number ?? '—',
+  },
+  {
+    key: 'tipo_veicolo',
+    label: 'Tipo veicolo',
+    accessor: (record) => {
+      const tipo = record.seizure_case_details?.vehicle_type;
+      if (!tipo) return '—';
+      return tipo.charAt(0).toUpperCase() + tipo.slice(1);
+    },
+  },
+  {
+    key: 'marca_modello_veicolo',
+    label: 'Marca e modello',
+    accessor: (record) =>
+      record.seizure_case_details?.vehicle_brand_model ?? record.vehicles?.brand ?? '—',
+  },
+  {
+    key: 'peso_veicolo',
+    label: 'Peso veicolo',
+    accessor: (record) => record.seizure_case_details?.vehicle_weight ?? '—',
+  },
+  {
+    key: 'tipo_intervento',
+    label: 'Tipo intervento',
+    accessor: (record) => {
+      const tipo = record.seizure_case_details?.intervention_type;
+      if (!tipo) return '—';
+      return tipo.charAt(0).toUpperCase() + tipo.slice(1);
+    },
+  },
+  {
+    key: 'latore_1_trasporto',
+    label: 'Latore 1° trasporto',
+    accessor: (record) => record.seizure_case_details?.carrier_one ?? '—',
+  },
+  {
+    key: 'km_1_trasporto',
+    label: 'Km 1° trasporto',
+    accessor: (record) =>
+      record.seizure_case_details?.carrier_one_km !== null && record.seizure_case_details?.carrier_one_km !== undefined
+        ? `${record.seizure_case_details.carrier_one_km} km`
+        : '—',
+  },
+  {
+    key: 'latore_2_trasporto',
+    label: 'Latore 2° trasporto',
+    accessor: (record) => record.seizure_case_details?.carrier_two ?? '—',
+  },
+  {
+    key: 'km_2_trasporto',
+    label: 'Km 2° trasporto',
+    accessor: (record) =>
+      record.seizure_case_details?.carrier_two_km !== null && record.seizure_case_details?.carrier_two_km !== undefined
+        ? `${record.seizure_case_details.carrier_two_km} km`
+        : '—',
+  },
+  {
+    key: 'data_entrata',
+    label: 'Data entrata',
+    accessor: (record) => formatDate(record.seizure_case_details?.entry_date) ?? '—',
+  },
+  {
+    key: 'motivo_entrata',
+    label: 'Motivo entrata',
+    accessor: (record) => record.seizure_case_details?.entry_reason ?? '—',
+  },
+  {
+    key: 'data_uscita',
+    label: 'Data uscita',
+    accessor: (record) => formatDate(record.seizure_case_details?.exit_date) ?? '—',
+  },
+  {
+    key: 'motivo_uscita',
+    label: 'Motivo uscita',
+    accessor: (record) => record.seizure_case_details?.exit_reason ?? '—',
+  },
+  {
+    key: 'durata_custodia',
+    label: 'Durata custodia',
+    accessor: (record) => record.seizure_case_details?.custody_duration ?? '—',
+  },
+  {
+    key: 'oneri_custodia',
+    label: 'Oneri custodia',
+    accessor: (record) => record.seizure_case_details?.custody_costs ?? '—',
+  },
+  {
+    key: 'ufficio_destinatario',
+    label: 'Ufficio destinatario',
+    accessor: (record) =>
+      record.destination_office?.name ??
+      record.seizure_case_details?.destination_office ??
+      '—',
+  },
+  {
+    key: 'data_richiesta',
+    label: 'Data richiesta',
+    accessor: (record) => formatDate(record.seizure_case_details?.request_date) ?? '—',
+  },
+  {
+    key: 'data_fattura',
+    label: 'Data fattura',
+    accessor: (record) => formatDate(record.seizure_case_details?.invoice_date) ?? '—',
+  },
+  {
+    key: 'numero_fattura',
+    label: 'Numero fattura',
+    accessor: (record) => record.seizure_case_details?.invoice_number ?? '—',
+  },
+  {
+    key: 'importo_fattura',
+    label: 'Importo fattura',
+    accessor: (record) => record.seizure_case_details?.invoice_amount ?? '—',
+  },
+  {
+    key: 'note_varie',
+    label: 'Note varie',
+    accessor: (record) => record.seizure_case_details?.notes ?? '—',
   },
   {
     key: 'status',
@@ -57,61 +216,21 @@ const REPORT_COLUMNS: ReportColumn[] = [
     label: 'Sottocategoria',
     accessor: (record) => record.subcategory ?? '—',
   },
-  {
-    key: 'owner',
-    label: 'Trasgressore / proprietario',
-    accessor: (record) =>
-      record.seizure_case_details?.offender_details ??
-      record.seizure_case_details?.notes ??
-      '—',
-  },
-  {
-    key: 'dates',
-    label: 'Date principali',
-    accessor: (record) => {
-      const details = record.seizure_case_details;
-      const parts = [
-        details?.seizure_date ? `Sequestro: ${details.seizure_date}` : null,
-        details?.entry_date ? `Entrata: ${details.entry_date}` : null,
-        details?.exit_date ? `Uscita: ${details.exit_date}` : null,
-      ].filter(Boolean);
-      return parts.join(' • ') || '—';
-    },
-  },
-  {
-    key: 'custody',
-    label: 'Custodia',
-    accessor: (record) => {
-      const details = record.seizure_case_details;
-      const parts = [
-        details?.custody_duration ? `Durata: ${details.custody_duration}` : null,
-        details?.custody_costs ? `Oneri: ${details.custody_costs}` : null,
-      ].filter(Boolean);
-      return parts.join(' • ') || '—';
-    },
-  },
-  {
-    key: 'invoice',
-    label: 'Fatturazione',
-    accessor: (record) => {
-      const details = record.seizure_case_details;
-      const parts = [
-        details?.invoice_number ? `N° ${details.invoice_number}` : null,
-        details?.invoice_amount ? `Importo ${details.invoice_amount}` : null,
-        details?.invoice_date ? `Data ${details.invoice_date}` : null,
-      ].filter(Boolean);
-      return parts.join(' • ') || '—';
-    },
-  },
 ];
 
 type ViewMode = 'list' | 'create' | 'edit';
 type PrintStatus = 'idle' | 'preparing' | 'printing' | 'blocked' | 'error';
 
-export function CasesPage() {
+type CasesPageProps = {
+  showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+};
+
+export function CasesPage({ showToast }: CasesPageProps) {
   const [cases, setCases] = useState<CaseRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [selectedCaseIds, setSelectedCaseIds] = useState<string[]>([]);
@@ -128,7 +247,6 @@ export function CasesPage() {
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailModalCaseId, setDetailModalCaseId] = useState<string | null>(null);
   const [hasFormChanges, setHasFormChanges] = useState(false);
-  const [lockError, setLockError] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
     title: string;
@@ -141,12 +259,45 @@ export function CasesPage() {
     onConfirm: () => {},
   });
 
-  const loadCases = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const loadCases = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const data = await fetchCases();
-      setCases(data);
+      if (silent) {
+        // Refresh silenzioso: aggiorna i dati mantenendo l'ordine esistente quando possibile
+        setCases((prevCases) => {
+          // Se non ci sono pratiche precedenti, usa i nuovi dati direttamente
+          if (prevCases.length === 0) {
+            return data;
+          }
+          
+          // Crea una mappa dei nuovi dati per accesso rapido
+          const dataMap = new Map(data.map(item => [item.id, item]));
+          
+          // Mantieni l'ordine delle pratiche esistenti, aggiornando i dati
+          const updated = prevCases
+            .map(prev => {
+              const updatedItem = dataMap.get(prev.id);
+              if (updatedItem) {
+                dataMap.delete(prev.id);
+                return updatedItem;
+              }
+              return null; // Pratica eliminata
+            })
+            .filter((item): item is CaseRecord => item !== null);
+          
+          // Aggiungi nuove pratiche alla fine
+          dataMap.forEach(item => updated.push(item));
+          
+          return updated;
+        });
+      } else {
+        // Caricamento iniziale: usa i dati direttamente
+        setCases(data);
+      }
       setSelectedCaseIds((prev) => prev.filter((id) => data.some((item) => item.id === id)));
       if (selectedCaseId && !data.some((item) => item.id === selectedCaseId)) {
         setSelectedCaseId(data[0]?.id ?? null);
@@ -154,32 +305,31 @@ export function CasesPage() {
         setSelectedCaseId(data[0].id);
       }
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Errore durante il caricamento delle pratiche.';
-      setError(message);
+      if (!silent) {
+        const message =
+          err instanceof Error ? err.message : 'Errore durante il caricamento delle pratiche.';
+        setError(message);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [selectedCaseId]);
 
   useEffect(() => {
     loadCases();
     
-    // Refresh automatico ogni 30 secondi per vedere modifiche di altri utenti
+    // Refresh automatico silenzioso ogni 60 secondi per vedere modifiche di altri utenti
+    // Con migliaia di pratiche, riduciamo la frequenza per non sovraccaricare il sistema
     const refreshInterval = setInterval(() => {
-      loadCases();
-    }, 30000);
+      loadCases(true); // Refresh silenzioso
+    }, 60000); // 60 secondi invece di 30 (ottimizzato per migliaia di record)
     
     return () => {
       clearInterval(refreshInterval);
-      // Rilascia il lock quando il componente viene smontato
-      if (editingCaseId) {
-        releaseCaseLock(editingCaseId).catch((error) => {
-          console.error('Errore rilascio lock al cleanup:', error);
-        });
-      }
     };
-  }, [loadCases, editingCaseId]);
+  }, [loadCases]);
 
   const handleToggleCaseSelection = (id: string) => {
     setSelectedCaseIds((prev) =>
@@ -218,15 +368,6 @@ export function CasesPage() {
       }
     }
 
-    // Rilascia il lock se si sta modificando una pratica
-    if (editingCaseId) {
-      try {
-        await releaseCaseLock(editingCaseId);
-      } catch (error) {
-        console.error('Errore rilascio lock:', error);
-      }
-    }
-
     resetCreationState();
     setViewMode('create');
     setEditingCaseId(null);
@@ -234,23 +375,12 @@ export function CasesPage() {
     setDetailModalOpen(false);
     setDetailModalCaseId(null);
     setHasFormChanges(false);
-    setLockError(null);
   };
 
   const handleCancelForm = async () => {
-    // Rilascia il lock se si sta modificando una pratica
-    if (editingCaseId) {
-      try {
-        await releaseCaseLock(editingCaseId);
-      } catch (error) {
-        console.error('Errore rilascio lock:', error);
-      }
-    }
-    
     setViewMode('list');
     setEditingCaseId(null);
     setHasFormChanges(false);
-    setLockError(null);
     if (cases.length > 0 && !selectedCaseId) {
       setSelectedCaseId(cases[0].id);
     }
@@ -267,49 +397,50 @@ export function CasesPage() {
   }, [editingCase]);
 
   const handleSubmitForm = async (form: SeizureCaseFormData) => {
-    const { procedureType, subCategoryLabel } = deriveProcedureMeta(
-      creationCategoryKey,
-      creationSubCategoryKey
-    );
+    setSaving(true);
+    try {
+      const { procedureType, subCategoryLabel } = deriveProcedureMeta(
+        creationCategoryKey,
+        creationSubCategoryKey
+      );
 
-    if (viewMode === 'edit' && editingCaseId) {
-      const record = cases.find((item) => item.id === editingCaseId);
-      const vehicleId = record?.vehicle_id ?? record?.vehicles?.id ?? null;
-      await updateCaseFromForm(
-        editingCaseId,
-        form,
-        {
+      if (viewMode === 'edit' && editingCaseId) {
+        const record = cases.find((item) => item.id === editingCaseId);
+        const vehicleId = record?.vehicle_id ?? record?.vehicles?.id ?? null;
+        await updateCaseFromForm(
+          editingCaseId,
+          form,
+          {
+            categoryKey: creationCategoryKey,
+            subCategoryLabel,
+            procedureType,
+          },
+          {
+            vehicleId,
+            caseNumber: record?.case_number ?? '',
+          }
+        );
+        showToast('Pratica modificata con successo', 'success');
+      } else {
+        await createCaseFromForm(form, {
           categoryKey: creationCategoryKey,
           subCategoryLabel,
           procedureType,
-        },
-        {
-          vehicleId,
-          caseNumber: record?.case_number ?? '',
-        }
-      );
-    } else {
-      await createCaseFromForm(form, {
-        categoryKey: creationCategoryKey,
-        subCategoryLabel,
-        procedureType,
-      });
-    }
-
-    // Rilascia il lock dopo il salvataggio
-    if (editingCaseId) {
-      try {
-        await releaseCaseLock(editingCaseId);
-      } catch (error) {
-        console.error('Errore rilascio lock:', error);
+        });
+        showToast('Pratica creata con successo', 'success');
       }
-    }
 
-    await loadCases();
-    setViewMode('list');
-    setEditingCaseId(null);
-    setHasFormChanges(false);
-    setLockError(null);
+      await loadCases();
+      setViewMode('list');
+      setEditingCaseId(null);
+      setHasFormChanges(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Errore durante il salvataggio della pratica';
+      showToast(message, 'error');
+      console.error('Errore durante il salvataggio:', error);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDeleteCases = async (ids: string[]) => {
@@ -326,15 +457,25 @@ export function CasesPage() {
         onConfirm: () => {
           setConfirmDialog((prev) => ({ ...prev, open: false }));
           (async () => {
+            setDeleting(true);
             try {
               await deleteCases(ids);
               await loadCases();
               setSelectedCaseIds((prev) => prev.filter((id) => !ids.includes(id)));
               setDetailModalOpen(false);
               setDetailModalCaseId(null);
+              showToast(
+                ids.length === 1 
+                  ? 'Pratica eliminata con successo' 
+                  : `${ids.length} pratiche eliminate con successo`,
+                'success'
+              );
             } catch (error) {
+              const message = error instanceof Error ? error.message : 'Errore durante l\'eliminazione delle pratiche';
+              showToast(message, 'error');
               console.error('Errore durante l\'eliminazione:', error);
-              alert('Errore durante l\'eliminazione delle pratiche. Controlla la console per i dettagli.');
+            } finally {
+              setDeleting(false);
             }
           })();
         },
@@ -351,24 +492,6 @@ export function CasesPage() {
       if (!window.confirm(message)) {
         return;
       }
-    }
-
-    // Verifica se la pratica è già bloccata
-    try {
-      const existingLock = await checkCaseLock(id);
-      if (existingLock) {
-        const lockedBy = existingLock.locked_by_display_name || existingLock.locked_by_username || 'un altro utente';
-        setLockError(`La pratica è già in modifica da ${lockedBy}.`);
-        return;
-      }
-
-      // Acquisisci il lock
-      await acquireCaseLock(id);
-      setLockError(null);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Errore durante l\'acquisizione del lock.';
-      setLockError(message);
-      return;
     }
 
     const record = cases.find((item) => item.id === id);
@@ -396,6 +519,35 @@ export function CasesPage() {
     try {
       await printReleaseDocument(payload);
       setPrintStatus('idle');
+      
+      // Chiedi se segnare il veicolo come rilasciato
+      const caseId = payload.caseId || cases.find(
+        (c) => 
+          c.case_number === payload.procedimentoNumero ||
+          c.seizure_case_details?.procedure_number === payload.procedimentoNumero ||
+          (payload.targa && (
+            c.vehicles?.plate === payload.targa ||
+            c.seizure_case_details?.plate_number === payload.targa
+          ))
+      )?.id;
+      
+      if (caseId) {
+        const shouldMarkReleased = window.confirm(
+          'Il foglio di rilascio è stato generato con successo.\n\nVuoi segnare questo veicolo come rilasciato?'
+        );
+        
+        if (shouldMarkReleased) {
+          try {
+            await updateCaseStatus(caseId, 'rilasciato');
+            await loadCases();
+            showToast('Veicolo segnato come rilasciato', 'success');
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Errore durante l\'aggiornamento dello status';
+            showToast(message, 'error');
+            console.error('Errore aggiornamento status:', error);
+          }
+        }
+      }
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : 'Errore durante la generazione del foglio.';
@@ -488,16 +640,12 @@ export function CasesPage() {
       </div>
 
       {error && <p className="form-error">{error}</p>}
-      {lockError && (
-        <div className="alert error" style={{ margin: '1rem 0', padding: '1rem', borderRadius: '8px' }}>
-          <strong>Attenzione:</strong> {lockError}
-        </div>
-      )}
 
       {viewMode === 'list' && (
         <CaseBoard
           cases={cases}
           loading={loading}
+          deleting={deleting}
           selectedCaseId={selectedCaseId}
           selectedCaseIds={selectedCaseIds}
           onToggleCaseSelection={handleToggleCaseSelection}
@@ -534,6 +682,7 @@ export function CasesPage() {
             mode={viewMode === 'edit' ? 'edit' : 'create'}
             initialForm={viewMode === 'edit' ? editingForm : null}
             onFormChange={setHasFormChanges}
+            saving={saving}
           />
         </div>
       )}

@@ -27,9 +27,6 @@ export function CaseDetailModal({
       <div className="modal-card modal-card-wide case-detail-modal-card">
         <div className="modal-header">
           <h3>Dettaglio pratica</h3>
-          <button type="button" className="secondary" onClick={onClose}>
-            Chiudi
-          </button>
         </div>
         <div className="modal-body scrollable">
           <CaseDetail
@@ -38,6 +35,11 @@ export function CaseDetailModal({
             onDelete={onDelete}
             onRequestRelease={onRelease}
           />
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="secondary" onClick={onClose}>
+            Chiudi
+          </button>
         </div>
       </div>
     </div>

@@ -4,6 +4,7 @@ import type { CaseRecord } from '../types';
 type CaseBoardProps = {
   cases: CaseRecord[];
   loading: boolean;
+  deleting?: boolean;
   selectedCaseId: string | null;
   selectedCaseIds: string[];
   onToggleCaseSelection: (id: string) => void;
@@ -20,6 +21,7 @@ type CaseBoardProps = {
 export function CaseBoard({
   cases,
   loading,
+  deleting = false,
   selectedCaseId,
   selectedCaseIds,
   onToggleCaseSelection,
@@ -87,13 +89,51 @@ export function CaseBoard({
       if (!term) return true;
 
       const details = item.seizure_case_details;
+      
+      // Formatta la data per la ricerca
+      const formatDateForSearch = (dateStr: string | null | undefined) => {
+        if (!dateStr) return '';
+        try {
+          const date = new Date(dateStr);
+          const day = String(date.getDate()).padStart(2, '0');
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const year = date.getFullYear();
+          return `${day}-${month}-${year} ${day}${month}${year}`;
+        } catch {
+          return dateStr;
+        }
+      };
+      
       const haystack = [
+        // Numero interno pratica
+        item.internal_number,
+        // Numero procedimento
         item.case_number,
+        details?.procedure_number,
+        // Chiave in bacheca
+        item.board_key,
+        // Targa
         item.vehicles?.plate,
         details?.plate_number,
+        // Generalità trasgressore
         details?.offender_details,
+        // Organo accertatore
+        details?.enforcement_body,
+        // Tipo veicolo
+        details?.vehicle_type,
+        // Marca e modello
+        details?.vehicle_brand_model,
+        item.vehicles?.brand,
+        item.vehicles?.model,
+        // Numero telaio
+        details?.vin_number,
+        item.vehicles?.vin,
+        // Note
         details?.notes,
+        // Sottocategoria
         item.subcategory,
+        // Data sequestro (formattata)
+        formatDateForSearch(details?.seizure_date),
       ]
         .filter(Boolean)
         .join(' ')
@@ -177,11 +217,11 @@ export function CaseBoard({
           </button>
           <button
             type="button"
-            className="danger"
+            className={`danger ${deleting ? 'loading' : ''}`}
             onClick={deleteSelection}
-            disabled={selectedCaseIds.length === 0}
+            disabled={selectedCaseIds.length === 0 || deleting}
           >
-            Elimina selezionate
+            {deleting ? 'Eliminazione...' : 'Elimina selezionate'}
           </button>
         </div>
       </div>
@@ -264,7 +304,23 @@ export function CaseBoard({
             const plate =
               record.vehicles?.plate ?? details?.plate_number ?? '—';
             const offender = details?.offender_details ?? 'Trasgressore n.d.';
-            const openedAt = details?.seizure_date ?? record.opened_at ?? '—';
+            
+            const formatDate = (dateStr: string | null | undefined) => {
+              if (!dateStr) return '—';
+              try {
+                const date = new Date(dateStr);
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}-${month}-${year}`;
+              } catch {
+                return dateStr;
+              }
+            };
+            
+            const seizureDate = formatDate(details?.seizure_date);
+            const vehicleType = details?.vehicle_type ?? '—';
+            const vehicleBrandModel = details?.vehicle_brand_model ?? record.vehicles?.brand ?? '—';
 
             return (
               <div
@@ -282,45 +338,90 @@ export function CaseBoard({
                   }
                 }}
               >
-                <div className="card-head">
-                  <div className="card-plate">{plate}</div>
-                  <div className="card-actions">
-                    <label
-                      className="card-checkbox"
+                <div className="card-top-bar">
+                  <label
+                    className="card-checkbox"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={(event) => {
+                        event.stopPropagation();
+                        onToggleCaseSelection(record.id);
+                      }}
                       onClick={(event) => {
                         event.stopPropagation();
                       }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={(event) => {
-                          event.stopPropagation();
-                          onToggleCaseSelection(record.id);
-                        }}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                        }}
-                      />
-                      <span />
-                    </label>
+                    />
+                    <span />
+                  </label>
+                  <div className="card-plate-badge">{plate}</div>
+                  <div className="card-tags-inline">
+                    <span className={`status-chip ${record.status}`}>
+                      {record.status}
+                    </span>
+                    <span className="case-badge">{record.procedure_type}</span>
                   </div>
                 </div>
-                <div>
-                  <h3 className="card-title">{record.case_number}</h3>
-                  <p className="card-subtitle">{offender}</p>
-                </div>
-                <div className="card-meta">
-                  <span className={`status-chip ${record.status}`}>
-                    {record.status}
-                  </span>
-                  <span className="case-badge">{record.procedure_type}</span>
+
+                <div className="card-main-content">
+                  <div className="card-primary-info">
+                    <div className="card-number-section">
+                      <span className="card-number-label">N° Pratica</span>
+                      <span className="card-number-value">
+                        {record.internal_number ? `#${record.internal_number}` : record.case_number}
+                      </span>
+                    </div>
+                    <div className="card-client-section">
+                      <span className="card-client-label">Cliente</span>
+                      <span className="card-client-value">{offender}</span>
+                    </div>
+                  </div>
+
+                  <div className="card-secondary-info">
+                    <div className="card-info-grid">
+                      <div className="card-info-cell">
+                        <span className="card-info-label">Data sequestro</span>
+                        <span className="card-info-text">{seizureDate}</span>
+                      </div>
+                      <div className="card-info-cell">
+                        <span className="card-info-label">Tipo veicolo</span>
+                        <span className="card-info-text">{vehicleType}</span>
+                      </div>
+                      <div className="card-info-cell">
+                        <span className="card-info-label">Marca/Modello</span>
+                        <span className="card-info-text">{vehicleBrandModel}</span>
+                      </div>
+                      {record.board_key && (
+                        <div className="card-info-cell">
+                          <span className="card-info-label">Chiave bacheca</span>
+                          <span className="card-info-text">{record.board_key}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                   {record.subcategory && (
-                    <span className="case-meta">{record.subcategory}</span>
+                    <div className="card-subcategory">
+                      <span className="case-meta">{record.subcategory}</span>
+                    </div>
                   )}
                 </div>
-                <div className="card-date">Data sequestro: {openedAt}</div>
+
                 <div className="card-actions">
+                  <button
+                    type="button"
+                    className="ghost small"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onShowDetails(record.id);
+                    }}
+                  >
+                    Maggiori dettagli
+                  </button>
                   <button
                     type="button"
                     className="secondary small"

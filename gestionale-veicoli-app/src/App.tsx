@@ -5,6 +5,7 @@ import { LoginForm } from './components/auth/LoginForm';
 import { AdminUsersPanel } from './components/admin/AdminUsersPanel';
 import { CasesPage } from './features/cases/CasesPage';
 import { OfficesPage } from './features/offices/OfficesPage';
+import { ToastContainer, useToast } from './components/Toast';
 import './App.css';
 
 type ProfileRole = 'admin' | 'operatore' | 'solo_lettura';
@@ -24,6 +25,7 @@ function App() {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<'cases' | 'offices' | 'admin'>('cases');
+  const { toasts, showToast, removeToast } = useToast();
 
   useEffect(() => {
     let ignore = false;
@@ -119,6 +121,7 @@ function App() {
 
   return (
     <div className="app-shell">
+      <ToastContainer toasts={toasts} onClose={removeToast} />
       <header className="app-header">
         <div className="header-brand">
           <h1>Gestionale Veicoli</h1>
@@ -174,11 +177,11 @@ function App() {
         </nav>
 
         <div className="app-section">
-          {activeSection === 'cases' && <CasesPage />}
-          {activeSection === 'offices' && <OfficesPage canEdit={canManageOffices} />}
+          {activeSection === 'cases' && <CasesPage showToast={showToast} />}
+          {activeSection === 'offices' && <OfficesPage canEdit={canManageOffices} showToast={showToast} />}
           {activeSection === 'admin' && (
             <div className="single-panel">
-              <AdminUsersPanel isAdmin={isAdmin} currentUserId={session.user.id} />
+              <AdminUsersPanel isAdmin={isAdmin} currentUserId={session.user.id} showToast={showToast} />
             </div>
           )}
         </div>

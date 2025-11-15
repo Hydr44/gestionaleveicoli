@@ -124,6 +124,7 @@ export async function fetchCases(): Promise<CaseRecord[]> {
       )
     `
     )
+    .order('internal_number', { ascending: true, nullsFirst: false })
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -133,7 +134,7 @@ export async function fetchCases(): Promise<CaseRecord[]> {
 
   const raw = (data ?? []) as SupabaseCaseRow[];
 
-  return raw.map((item) => ({
+  const mapped = raw.map((item) => ({
     id: item.id,
     case_number: item.case_number,
     status: item.status,
@@ -153,6 +154,32 @@ export async function fetchCases(): Promise<CaseRecord[]> {
       ? item.destination_offices[0] ?? null
       : item.destination_offices,
   })) as CaseRecord[];
+
+  // Ordina per numero interno pratica in modo numerico (01, 02, 10, 11, etc.)
+  return mapped.sort((a, b) => {
+    const aNum = a.internal_number;
+    const bNum = b.internal_number;
+    
+    // Se entrambi hanno un numero interno, ordina numericamente
+    if (aNum && bNum) {
+      // Estrai numeri dalla stringa (es. "01" -> 1, "02" -> 2)
+      const aNumValue = parseInt(aNum.replace(/\D/g, ''), 10) || 0;
+      const bNumValue = parseInt(bNum.replace(/\D/g, ''), 10) || 0;
+      
+      if (aNumValue !== bNumValue) {
+        return aNumValue - bNumValue;
+      }
+      // Se i numeri sono uguali, ordina alfabeticamente per la stringa completa
+      return aNum.localeCompare(bNum, undefined, { numeric: true, sensitivity: 'base' });
+    }
+    
+    // Se solo uno ha numero interno, quello con numero viene prima
+    if (aNum && !bNum) return -1;
+    if (!aNum && bNum) return 1;
+    
+    // Se nessuno ha numero interno, ordina per data creazione (più recente prima)
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
 }
 
 export async function createCaseFromForm(
@@ -193,10 +220,35 @@ export async function createCaseFromForm(
     throw vehicleError;
   }
 
-  const caseNumber =
-    normalizeString(form.numero_procedimento) ||
-    `CASE-${new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14)}`;
+  const internalNumber = normalizeString(form.numero_interno_pratica);
+  if (!internalNumber) {
+    throw new Error('Il numero interno pratica è obbligatorio');
+  }
 
+  const procedureType = options.procedureType || procedureTypeDefault;
+  const subcategory = options.subCategoryLabel || subcategoryDefault;
+
+  // Verifica unicità del numero interno pratica per categoria/sottocategoria
+  const { data: existingCase, error: checkError } = await supabase
+    .from('cases')
+    .select('id, internal_number')
+    .eq('procedure_type', procedureType)
+    .eq('subcategory', subcategory || '')
+    .eq('internal_number', internalNumber)
+    .maybeSingle();
+
+  if (checkError) {
+    console.error('Errore verifica unicità numero interno pratica', checkError);
+    throw checkError;
+  }
+
+  if (existingCase) {
+    throw new Error(
+      `Il numero interno pratica "${internalNumber}" esiste già per ${procedureType}${subcategory ? ` - ${subcategory}` : ''}.`
+    );
+  }
+
+  const caseNumber = normalizeString(form.numero_procedimento);
   const openedAt = normalizeDate(form.data_sequestro) || nowIsoDate;
 
   const { data: caseData, error: caseError } = await supabase
@@ -204,9 +256,9 @@ export async function createCaseFromForm(
     .insert([
       {
         vehicle_id: vehicleData.id,
-        case_number: caseNumber,
-        procedure_type: options.procedureType || procedureTypeDefault,
-        subcategory: options.subCategoryLabel || subcategoryDefault,
+        case_number: caseNumber || null,
+        procedure_type: procedureType,
+        subcategory: subcategory,
         status: defaultStatus,
         opened_at: openedAt,
         closed_at: null,
@@ -214,7 +266,7 @@ export async function createCaseFromForm(
         location: normalizeString(form.ufficio_destinatario),
         destination_office_id: form.destination_office_id ?? null,
         board_key: normalizeString(form.chiave_bacheca),
-        internal_number: normalizeString(form.numero_interno_pratica),
+        internal_number: internalNumber,
       },
     ])
     .select()
@@ -222,6 +274,12 @@ export async function createCaseFromForm(
 
   if (caseError) {
     console.error('Errore creazione pratica', caseError);
+    // Se l'errore è dovuto al vincolo di unicità, fornisci un messaggio più chiaro
+    if (caseError.code === '23505' || caseError.message?.includes('unique')) {
+      throw new Error(
+        `Il numero interno pratica "${internalNumber}" esiste già per ${procedureType}${subcategory ? ` - ${subcategory}` : ''}.`
+      );
+    }
     throw caseError;
   }
 
@@ -425,21 +483,50 @@ export async function updateCaseFromForm(
     throw vehicleError;
   }
 
-  const caseNumberValue =
-    normalizeString(form.numero_procedimento) ?? context.caseNumber ?? `CASE-${caseId}`;
+  const internalNumber = normalizeString(form.numero_interno_pratica);
+  if (!internalNumber) {
+    throw new Error('Il numero interno pratica è obbligatorio');
+  }
+
+  const procedureType = options.procedureType;
+  const subcategory = options.subCategoryLabel || subcategoryDefault;
+
+  // Verifica unicità del numero interno pratica per categoria/sottocategoria
+  // (escludendo il caso corrente)
+  const { data: existingCase, error: checkError } = await supabase
+    .from('cases')
+    .select('id, internal_number')
+    .eq('procedure_type', procedureType)
+    .eq('subcategory', subcategory || '')
+    .eq('internal_number', internalNumber)
+    .neq('id', caseId)
+    .maybeSingle();
+
+  if (checkError) {
+    console.error('Errore verifica unicità numero interno pratica', checkError);
+    throw checkError;
+  }
+
+  if (existingCase) {
+    throw new Error(
+      `Il numero interno pratica "${internalNumber}" esiste già per ${procedureType}${subcategory ? ` - ${subcategory}` : ''}.`
+    );
+  }
+
+  const caseNumberValue = normalizeString(form.numero_procedimento);
 
   const { data: caseData, error: caseError } = await supabase
     .from('cases')
     .update({
       vehicle_id: vehicleData.id,
-      case_number: caseNumberValue,
-      procedure_type: options.procedureType,
-      subcategory: options.subCategoryLabel || subcategoryDefault,
+      case_number: caseNumberValue || null,
+      procedure_type: procedureType,
+      subcategory: subcategory,
       description: normalizeString(form.note_varie),
       location: normalizeString(form.ufficio_destinatario),
       destination_office_id: form.destination_office_id ?? null,
       board_key: normalizeString(form.chiave_bacheca),
-      internal_number: normalizeString(form.numero_interno_pratica),
+      internal_number: internalNumber,
     })
     .eq('id', caseId)
     .select()
@@ -447,6 +534,12 @@ export async function updateCaseFromForm(
 
   if (caseError) {
     console.error('Errore aggiornamento pratica', caseError);
+    // Se l'errore è dovuto al vincolo di unicità, fornisci un messaggio più chiaro
+    if (caseError.code === '23505' || caseError.message?.includes('unique')) {
+      throw new Error(
+        `Il numero interno pratica "${internalNumber}" esiste già per ${procedureType}${subcategory ? ` - ${subcategory}` : ''}.`
+      );
+    }
     throw caseError;
   }
 
@@ -503,146 +596,30 @@ export async function deleteCases(caseIds: string[]): Promise<void> {
   }
 }
 
-// Sistema di locking per pratiche
-export type CaseLockInfo = {
-  case_id: string;
-  locked_by: string;
-  locked_at: string;
-  expires_at: string;
-  locked_by_username?: string | null;
-  locked_by_display_name?: string | null;
-};
+export async function updateCaseStatus(caseId: string, status: string): Promise<void> {
+  const { error: updateError } = await supabase
+    .from('cases')
+    .update({ status })
+    .eq('id', caseId);
 
-export async function acquireCaseLock(caseId: string): Promise<CaseLockInfo> {
-  // Prima pulisci i lock scaduti
-  await supabase.rpc('cleanup_expired_locks');
-  
-  // Verifica se esiste già un lock valido
-  const { data: existingLock, error: checkError } = await supabase
-    .from('case_edit_locks')
-    .select(
-      `
-      case_id,
-      locked_by,
-      locked_at,
-      expires_at,
-      profiles:locked_by (
-        username,
-        display_name
-      )
-      `
-    )
-    .eq('case_id', caseId)
-    .gt('expires_at', new Date().toISOString())
-    .maybeSingle();
-
-  if (checkError) {
-    console.error('Errore verifica lock', checkError);
-    throw checkError;
+  if (updateError) {
+    console.error('Errore aggiornamento status', updateError);
+    throw updateError;
   }
 
-  if (existingLock) {
-    const profile = Array.isArray(existingLock.profiles) 
-      ? existingLock.profiles[0] 
-      : existingLock.profiles;
-    
-    throw new Error(
-      `La pratica è già in modifica da ${profile?.display_name || profile?.username || 'un altro utente'}.`
-    );
-  }
-
-  // Crea il nuovo lock
-  const { data: newLock, error: lockError } = await supabase
-    .from('case_edit_locks')
+  const { error: historyError } = await supabase
+    .from('case_status_history')
     .insert([
       {
         case_id: caseId,
-        locked_by: (await supabase.auth.getUser()).data.user?.id,
-        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minuti
+        status,
+        notes: `Status aggiornato a: ${status}`,
       },
-    ])
-    .select(
-      `
-      case_id,
-      locked_by,
-      locked_at,
-      expires_at,
-      profiles:locked_by (
-        username,
-        display_name
-      )
-      `
-    )
-    .single();
+    ]);
 
-  if (lockError) {
-    console.error('Errore acquisizione lock', lockError);
-    throw lockError;
+  if (historyError) {
+    console.error('Errore inserimento history', historyError);
+    throw historyError;
   }
-
-  const profile = Array.isArray(newLock.profiles) 
-    ? newLock.profiles[0] 
-    : newLock.profiles;
-
-  return {
-    case_id: newLock.case_id,
-    locked_by: newLock.locked_by,
-    locked_at: newLock.locked_at,
-    expires_at: newLock.expires_at,
-    locked_by_username: profile?.username ?? null,
-    locked_by_display_name: profile?.display_name ?? null,
-  };
-}
-
-export async function releaseCaseLock(caseId: string): Promise<void> {
-  const { error } = await supabase
-    .from('case_edit_locks')
-    .delete()
-    .eq('case_id', caseId);
-
-  if (error) {
-    console.error('Errore rilascio lock', error);
-    throw error;
-  }
-}
-
-export async function checkCaseLock(caseId: string): Promise<CaseLockInfo | null> {
-  const { data, error } = await supabase
-    .from('case_edit_locks')
-    .select(
-      `
-      case_id,
-      locked_by,
-      locked_at,
-      expires_at,
-      profiles:locked_by (
-        username,
-        display_name
-      )
-      `
-    )
-    .eq('case_id', caseId)
-    .gt('expires_at', new Date().toISOString())
-    .maybeSingle();
-
-  if (error) {
-    console.error('Errore verifica lock', error);
-    throw error;
-  }
-
-  if (!data) return null;
-
-  const profile = Array.isArray(data.profiles) 
-    ? data.profiles[0] 
-    : data.profiles;
-
-  return {
-    case_id: data.case_id,
-    locked_by: data.locked_by,
-    locked_at: data.locked_at,
-    expires_at: data.expires_at,
-    locked_by_username: profile?.username ?? null,
-    locked_by_display_name: profile?.display_name ?? null,
-  };
 }
 

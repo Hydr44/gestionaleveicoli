@@ -13,6 +13,7 @@ import type {
 
 type OfficesPageProps = {
   canEdit: boolean;
+  showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 };
 
 type ModalMode = 'create' | 'edit';
@@ -32,7 +33,7 @@ const defaultForm: DestinationOfficeFormData = {
   notes: '',
 };
 
-export function OfficesPage({ canEdit }: OfficesPageProps) {
+export function OfficesPage({ canEdit, showToast }: OfficesPageProps) {
   const [records, setRecords] = useState<DestinationOfficeRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +42,7 @@ export function OfficesPage({ canEdit }: OfficesPageProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<ModalMode>('create');
   const [modalSaving, setModalSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState<DestinationOfficeFormData>(defaultForm);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -131,6 +133,7 @@ export function OfficesPage({ canEdit }: OfficesPageProps) {
       if (modalMode === 'create') {
         const created = await createDestinationOffice(form);
         setRecords((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+        showToast('Anagrafica creata con successo', 'success');
       } else if (selectedId) {
         const updated = await updateDestinationOffice(selectedId, form);
         setRecords((prev) =>
@@ -138,17 +141,17 @@ export function OfficesPage({ canEdit }: OfficesPageProps) {
             .map((item) => (item.id === updated.id ? updated : item))
             .sort((a, b) => a.name.localeCompare(b.name))
         );
+        showToast('Anagrafica modificata con successo', 'success');
       }
       setModalOpen(false);
       setSelectedId(null);
       setForm(defaultForm);
     } catch (submitError: unknown) {
+      const message = submitError instanceof Error
+        ? submitError.message
+        : 'Errore durante il salvataggio dell\'anagrafica.';
+      showToast(message, 'error');
       console.error(submitError);
-      alert(
-        submitError instanceof Error
-          ? submitError.message
-          : 'Errore durante il salvataggio dell’anagrafica.'
-      );
     } finally {
       setModalSaving(false);
     }
@@ -182,29 +185,39 @@ export function OfficesPage({ canEdit }: OfficesPageProps) {
         <div className="toolbar-right">
           <button
             type="button"
-            className="danger ghost"
+            className={`danger ghost ${deleting ? 'loading' : ''}`}
             onClick={async () => {
-              if (!canEdit || selectedIds.length === 0) return;
+              if (!canEdit || selectedIds.length === 0 || deleting) return;
               if (
                 window.confirm(
                   selectedIds.length === 1
-                    ? 'Confermi l’eliminazione dell’anagrafica selezionata?'
-                    : `Confermi l’eliminazione delle ${selectedIds.length} anagrafiche selezionate?`
+                    ? 'Confermi l\'eliminazione dell\'anagrafica selezionata?'
+                    : `Confermi l'eliminazione delle ${selectedIds.length} anagrafiche selezionate?`
                 )
               ) {
+                setDeleting(true);
                 try {
                   await deleteDestinationOffices(selectedIds);
                   setRecords((prev) => prev.filter((item) => !selectedIds.includes(item.id)));
                   setSelectedIds([]);
+                  showToast(
+                    selectedIds.length === 1
+                      ? 'Anagrafica eliminata con successo'
+                      : `${selectedIds.length} anagrafiche eliminate con successo`,
+                    'success'
+                  );
                 } catch (deleteError) {
+                  const message = deleteError instanceof Error ? deleteError.message : 'Errore durante l\'eliminazione delle anagrafiche';
+                  showToast(message, 'error');
                   console.error(deleteError);
-                  alert('Errore durante l’eliminazione delle anagrafiche selezionate.');
+                } finally {
+                  setDeleting(false);
                 }
               }
             }}
-            disabled={!canEdit || selectedIds.length === 0}
+            disabled={!canEdit || selectedIds.length === 0 || deleting}
           >
-            Elimina selezionate
+            {deleting ? 'Eliminazione...' : 'Elimina selezionate'}
           </button>
         </div>
       </div>
@@ -292,23 +305,30 @@ export function OfficesPage({ canEdit }: OfficesPageProps) {
                     </button>
                     <button
                       type="button"
-                      className="danger ghost small"
+                      className={`danger ghost small ${deleting ? 'loading' : ''}`}
                       onClick={async () => {
+                        if (deleting) return;
                         if (
-                          window.confirm('Confermi l’eliminazione di questa anagrafica?')
+                          window.confirm('Confermi l\'eliminazione di questa anagrafica?')
                         ) {
+                          setDeleting(true);
                           try {
                             await deleteDestinationOffices([office.id]);
                             setRecords((prev) => prev.filter((item) => item.id !== office.id));
                             setSelectedIds((prev) => prev.filter((id) => id !== office.id));
+                            showToast('Anagrafica eliminata con successo', 'success');
                           } catch (deleteError) {
+                            const message = deleteError instanceof Error ? deleteError.message : 'Errore durante l\'eliminazione dell\'anagrafica';
+                            showToast(message, 'error');
                             console.error(deleteError);
-                            alert('Errore durante l’eliminazione dell’anagrafica.');
+                          } finally {
+                            setDeleting(false);
                           }
                         }
                       }}
+                      disabled={deleting}
                     >
-                      Elimina
+                      {deleting ? 'Eliminazione...' : 'Elimina'}
                     </button>
                   </div>
                 )}
@@ -546,7 +566,7 @@ export function OfficesPage({ canEdit }: OfficesPageProps) {
                 <button type="button" className="secondary ghost" onClick={handleCloseModal}>
                   Annulla
                 </button>
-                <button type="submit" className="primary" disabled={modalSaving}>
+                <button type="submit" className={`primary ${modalSaving ? 'loading' : ''}`} disabled={modalSaving}>
                   {modalSaving ? 'Salvataggio...' : 'Salva anagrafica'}
                 </button>
               </div>

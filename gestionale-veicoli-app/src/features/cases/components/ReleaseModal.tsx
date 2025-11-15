@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CaseRecord, ReleasePrintPayload } from '../types';
 
 type ReleaseModalProps = {
@@ -33,6 +33,9 @@ export function ReleaseModal({
   const [targaValue, setTargaValue] = useState('');
   const [telaio, setTelaio] = useState('');
   const [dataGela, setDataGela] = useState('');
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [userModifiedFields, setUserModifiedFields] = useState<Set<string>>(new Set());
+  const previousSelectedCaseIdRef = useRef<string | null>(null);
 
   const filteredCases = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -61,47 +64,91 @@ export function ReleaseModal({
     return filteredCases.find((item) => item.id === selectedCaseId) ?? filteredCases[0];
   }, [filteredCases, selectedCaseId]);
 
+  // Reset solo quando si apre/chiude il modal o cambia initialCaseId, NON quando cambia cases
   useEffect(() => {
-    if (!open) return;
-    const today = new Date().toISOString().slice(0, 10);
-    setQuery('');
-    setReleaseDate(today);
-    setRecipientName('');
-    setDispostoDa('');
-    setUfficioDi('');
-    setDataDisposizione('');
-    setOraPresenza('');
-    setLuogoNascita('');
-    setDataNascita('');
-    setResidenza('');
-    setVia('');
-    setMarca('');
-    setTargaValue('');
-    setTelaio('');
-    setDataGela(today);
+    if (!open) {
+      setIsInitialized(false);
+      setUserModifiedFields(new Set());
+      previousSelectedCaseIdRef.current = null;
+      return;
+    }
+    
+    // Reset solo se non è ancora inizializzato
+    if (!isInitialized) {
+      const today = new Date().toISOString().slice(0, 10);
+      setQuery('');
+      setReleaseDate(today);
+      setRecipientName('');
+      setDispostoDa('');
+      setUfficioDi('');
+      setDataDisposizione('');
+      setOraPresenza('');
+      setLuogoNascita('');
+      setDataNascita('');
+      setResidenza('');
+      setVia('');
+      setMarca('');
+      setTargaValue('');
+      setTelaio('');
+      setDataGela(today);
+      setUserModifiedFields(new Set());
 
-    const initial =
-      initialCaseId && cases.some((item) => item.id === initialCaseId)
-        ? initialCaseId
-        : cases[0]?.id ?? '';
-    setSelectedCaseId(initial);
-  }, [open, initialCaseId, cases]);
-
+      const initial =
+        initialCaseId && cases.some((item) => item.id === initialCaseId)
+          ? initialCaseId
+          : cases[0]?.id ?? '';
+      setSelectedCaseId(initial);
+      setIsInitialized(true);
+    }
+  }, [open, initialCaseId, isInitialized]);
+  
+  // Aggiorna selectedCaseId solo se initialCaseId cambia e il modal è aperto
   useEffect(() => {
-    if (!selectedCase) return;
-    const details = selectedCase.seizure_case_details;
-    setProcedimentoNumero(details?.procedure_number ?? selectedCase.case_number ?? '');
-    setUfficioDi(
-      selectedCase.destination_office?.name ??
-        details?.destination_office ??
-        ''
-    );
-    setMarca(details?.vehicle_brand_model ?? selectedCase.vehicles?.brand ?? '');
-    setTargaValue(
-      selectedCase.vehicles?.plate ?? details?.plate_number ?? ''
-    );
-    setTelaio(details?.vin_number ?? selectedCase.vehicles?.vin ?? '');
-  }, [selectedCase]);
+    if (!open || !isInitialized) return;
+    if (initialCaseId && cases.some((item) => item.id === initialCaseId) && selectedCaseId !== initialCaseId) {
+      setSelectedCaseId(initialCaseId);
+      previousSelectedCaseIdRef.current = null; // Forza l'aggiornamento dei campi
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCaseId, open, isInitialized]);
+
+  // Aggiorna i campi solo quando cambia l'ID della pratica selezionata (non quando cambia l'oggetto cases)
+  useEffect(() => {
+    if (!selectedCaseId || !isInitialized) return;
+    
+    // Aggiorna solo se l'ID è cambiato, non se è lo stesso ID
+    if (previousSelectedCaseIdRef.current === selectedCaseId) return;
+    previousSelectedCaseIdRef.current = selectedCaseId;
+    
+    const caseItem = cases.find((c) => c.id === selectedCaseId);
+    if (!caseItem) return;
+    
+    const details = caseItem.seizure_case_details;
+    
+    // Aggiorna solo i campi che non sono stati modificati dall'utente
+    if (!userModifiedFields.has('procedimentoNumero')) {
+      setProcedimentoNumero(details?.procedure_number ?? caseItem.case_number ?? '');
+    }
+    if (!userModifiedFields.has('ufficioDi')) {
+      setUfficioDi(
+        caseItem.destination_office?.name ??
+          details?.destination_office ??
+          ''
+      );
+    }
+    if (!userModifiedFields.has('marca')) {
+      setMarca(details?.vehicle_brand_model ?? caseItem.vehicles?.brand ?? '');
+    }
+    if (!userModifiedFields.has('targaValue')) {
+      setTargaValue(
+        caseItem.vehicles?.plate ?? details?.plate_number ?? ''
+      );
+    }
+    if (!userModifiedFields.has('telaio')) {
+      setTelaio(details?.vin_number ?? caseItem.vehicles?.vin ?? '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCaseId, isInitialized]);
 
   useEffect(() => {
     if (!releaseDate) return;
@@ -125,6 +172,7 @@ export function ReleaseModal({
     }
 
     onPrint({
+      caseId: selectedCase.id,
       procedimentoNumero: procedimentoNumero || '—',
       dispostoDa: dispostoDa || '—',
       ufficioDi: ufficioDi || '—',
@@ -222,7 +270,10 @@ export function ReleaseModal({
                 <input
                   type="text"
                   value={procedimentoNumero}
-                  onChange={(event) => setProcedimentoNumero(event.target.value)}
+                  onChange={(event) => {
+                    setProcedimentoNumero(event.target.value);
+                    setUserModifiedFields((prev) => new Set(prev).add('procedimentoNumero'));
+                  }}
                 />
               </label>
               <label>
@@ -238,7 +289,10 @@ export function ReleaseModal({
                 <input
                   type="text"
                   value={ufficioDi}
-                  onChange={(event) => setUfficioDi(event.target.value)}
+                  onChange={(event) => {
+                    setUfficioDi(event.target.value);
+                    setUserModifiedFields((prev) => new Set(prev).add('ufficioDi'));
+                  }}
                 />
               </label>
               <label>
@@ -302,7 +356,10 @@ export function ReleaseModal({
                 <input
                   type="text"
                   value={marca}
-                  onChange={(event) => setMarca(event.target.value)}
+                  onChange={(event) => {
+                    setMarca(event.target.value);
+                    setUserModifiedFields((prev) => new Set(prev).add('marca'));
+                  }}
                 />
               </label>
               <label>
@@ -310,7 +367,10 @@ export function ReleaseModal({
                 <input
                   type="text"
                   value={targaValue}
-                  onChange={(event) => setTargaValue(event.target.value.toUpperCase())}
+                  onChange={(event) => {
+                    setTargaValue(event.target.value.toUpperCase());
+                    setUserModifiedFields((prev) => new Set(prev).add('targaValue'));
+                  }}
                 />
               </label>
               <label>
@@ -318,7 +378,10 @@ export function ReleaseModal({
                 <input
                   type="text"
                   value={telaio}
-                  onChange={(event) => setTelaio(event.target.value)}
+                  onChange={(event) => {
+                    setTelaio(event.target.value);
+                    setUserModifiedFields((prev) => new Set(prev).add('telaio'));
+                  }}
                 />
               </label>
             </div>

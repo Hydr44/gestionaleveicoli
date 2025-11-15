@@ -6,6 +6,7 @@ import { ConfirmDialog } from '../ConfirmDialog';
 type AdminUsersPanelProps = {
   isAdmin: boolean;
   currentUserId?: string | null;
+  showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 };
 
 type ProfileRow = {
@@ -39,10 +40,11 @@ const DEFAULT_ACCOUNT = {
   role: 'admin' as const,
 };
 
-export function AdminUsersPanel({ isAdmin, currentUserId }: AdminUsersPanelProps) {
+export function AdminUsersPanel({ isAdmin, currentUserId, showToast }: AdminUsersPanelProps) {
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [_deleting, setDeleting] = useState(false); // Usato per gestire lo stato di eliminazione
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -181,14 +183,18 @@ export function AdminUsersPanel({ isAdmin, currentUserId }: AdminUsersPanelProps
       await fetchProfiles();
       setForm(defaultForm);
       setEditingId(null);
+      showToast(
+        editingId ? 'Utente modificato con successo' : 'Utente creato con successo',
+        'success'
+      );
     } catch (err) {
-      if (err instanceof Error) {
-        setFormError(err.message);
-      } else if (typeof err === 'string') {
-        setFormError(err);
-      } else {
-        setFormError('Errore inatteso durante la creazione/modifica utente.');
-      }
+      const message = err instanceof Error
+        ? err.message
+        : typeof err === 'string'
+        ? err
+        : 'Errore inatteso durante la creazione/modifica utente.';
+      setFormError(message);
+      showToast(message, 'error');
     } finally {
       setSubmitting(false);
     }
@@ -226,12 +232,14 @@ export function AdminUsersPanel({ isAdmin, currentUserId }: AdminUsersPanelProps
       onConfirm: () => {
         setConfirmDialog((prev) => ({ ...prev, open: false }));
         (async () => {
+          setDeleting(true);
           try {
             await invoke('delete_supabase_user', { payload: { id: profile.id } });
             await fetchProfiles();
             if (editingId === profile.id) {
               handleCancelEdit();
             }
+            showToast('Utente eliminato con successo', 'success');
           } catch (err) {
             const message =
               err instanceof Error
@@ -240,6 +248,9 @@ export function AdminUsersPanel({ isAdmin, currentUserId }: AdminUsersPanelProps
                 ? err
                 : 'Errore inatteso durante l\'eliminazione.';
             setFormError(message);
+            showToast(message, 'error');
+          } finally {
+            setDeleting(false);
           }
         })();
       },
@@ -341,7 +352,7 @@ export function AdminUsersPanel({ isAdmin, currentUserId }: AdminUsersPanelProps
         </div>
         {formError && <p className="form-error">{formError}</p>}
         <div className="form-actions">
-          <button type="submit" className="primary" disabled={submitting}>
+          <button type="submit" className={`primary ${submitting ? 'loading' : ''}`} disabled={submitting}>
             {submitting
               ? editingId
                 ? 'Aggiornamento…'

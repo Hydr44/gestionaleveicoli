@@ -18,7 +18,14 @@ const buildReportMarkup = (
     <style>
       @page {
         size: A4 landscape;
-        margin: 14mm 18mm;
+        margin: 12mm 15mm;
+      }
+
+      @media print {
+        @page {
+          size: A4 landscape;
+          margin: 12mm 15mm;
+        }
       }
 
       body {
@@ -43,7 +50,8 @@ const buildReportMarkup = (
       table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 12px;
+        font-size: 10px;
+        table-layout: auto;
       }
 
       thead {
@@ -53,16 +61,24 @@ const buildReportMarkup = (
       th,
       td {
         border: 1px solid rgba(148, 163, 184, 0.4);
-        padding: 6px 10px;
+        padding: 4px 6px;
         text-align: left;
         vertical-align: top;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
       }
 
       th {
-        font-size: 12px;
+        font-size: 10px;
         text-transform: uppercase;
         letter-spacing: 0.02em;
         color: #1e3a8a;
+        white-space: nowrap;
+      }
+
+      td {
+        font-size: 9px;
+        max-width: 120px;
       }
 
       tbody tr:nth-child(even) {

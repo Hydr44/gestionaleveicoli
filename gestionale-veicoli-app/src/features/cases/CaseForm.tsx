@@ -23,6 +23,7 @@ type CaseFormProps = {
   mode?: 'create' | 'edit';
   initialForm?: Partial<SeizureCaseFormData> | null;
   onFormChange?: (hasChanges: boolean) => void;
+  saving?: boolean;
 };
 
 const vehicleTypes: VehicleTypeOption[] = ['ciclomotori', 'motocicli', 'autovetture', 'autocarri'];
@@ -84,9 +85,9 @@ export function CaseForm({
   mode = 'create',
   initialForm = null,
   onFormChange,
+  saving = false,
 }: CaseFormProps) {
   const [form, setForm] = useState<SeizureCaseFormData>({ ...defaultForm, ...initialForm });
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, string>>({});
   const [offices, setOffices] = useState<DestinationOfficeRecord[]>([]);
@@ -131,7 +132,6 @@ export function CaseForm({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setLoading(true);
     setError(null);
 
     try {
@@ -160,8 +160,7 @@ export function CaseForm({
       } else {
         setError('Errore durante il salvataggio della pratica.');
       }
-    } finally {
-      setLoading(false);
+      throw submissionError; // Rilancia per gestire il toast in CasesPage
     }
   };
 
@@ -277,7 +276,7 @@ export function CaseForm({
         </div>
         <div className="case-banner-hint">
           <p>
-            <strong>Consiglio:</strong> inserisci targa e numero procedimento per generare
+            <strong>Consiglio:</strong> inserisci targa e numero interno pratica per generare
             documenti coerenti. Puoi aggiornare i dettagli in qualsiasi momento.
           </p>
         </div>
@@ -343,12 +342,13 @@ export function CaseForm({
             </label>
 
             <label>
-              <span>Numero interno pratica</span>
+              <span>Numero interno pratica *</span>
               <input
                 type="text"
                 value={form.numero_interno_pratica}
                 onChange={(event) => handleChange('numero_interno_pratica', event.target.value)}
                 placeholder="es. INT-2025-001"
+                required
               />
             </label>
 
@@ -403,7 +403,7 @@ export function CaseForm({
                 >
                   {vehicleTypes.map((option) => (
                     <option key={option} value={option}>
-                      {option}
+                      {option.charAt(0).toUpperCase() + option.slice(1)}
                     </option>
                   ))}
                 </select>
@@ -441,7 +441,7 @@ export function CaseForm({
                 >
                   {interventionTypes.map((option) => (
                     <option key={option} value={option}>
-                      {option}
+                      {option.charAt(0).toUpperCase() + option.slice(1)}
                     </option>
                   ))}
                 </select>
@@ -674,11 +674,11 @@ export function CaseForm({
         </section>
 
         <footer className="form-actions">
-          <button type="button" className="secondary ghost" onClick={handleCancel} disabled={loading}>
+          <button type="button" className="secondary ghost" onClick={handleCancel} disabled={saving}>
             Annulla
           </button>
-          <button type="submit" className="primary" disabled={loading}>
-            {loading ? 'Salvataggio...' : mode === 'edit' ? 'Aggiorna pratica' : 'Salva pratica'}
+          <button type="submit" className={`primary ${saving ? 'loading' : ''}`} disabled={saving}>
+            {saving ? 'Salvataggio...' : mode === 'edit' ? 'Aggiorna pratica' : 'Salva pratica'}
           </button>
         </footer>
       </form>

@@ -133,6 +133,7 @@ export type DestinationOfficeRecord = {
 };
 
 export type ReleasePrintPayload = {
+  caseId?: string;
   procedimentoNumero: string;
   dispostoDa: string;
   ufficioDi: string;
